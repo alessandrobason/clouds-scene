@@ -12,6 +12,13 @@ typedef void (*apply_uniform_f)(sg_shader_stage stage, int ub_index, const sg_ra
 
 typedef void (*on_load_f)(struct host_t *host);
 
+typedef struct {
+    int resx;
+    int resy;
+    int winx;
+    int winy;
+} config_t;
+
 typedef struct host_t {
     sg_backend backend;
     sg_pipeline pip;
@@ -21,6 +28,7 @@ typedef struct host_t {
     sg_image blue_noise_texture;
     sg_sampler noise_sampler;
 
+    config_t config;
     on_load_f on_load;
 
     make_shader_f      make_shader;
@@ -30,7 +38,7 @@ typedef struct host_t {
     apply_uniform_f    apply_uniform;
 } host_t;
 
-#define RESX 900
-#define RESY 450
-#define WINX 1800
-#define WINY 1000
+#define DEFAULT_RESX 550
+#define DEFAULT_RESY 325
+#define DEFAULT_WINX 1800
+#define DEFAULT_WINY 1000

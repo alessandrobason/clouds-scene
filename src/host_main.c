@@ -6,6 +6,8 @@
 
 #include "colla/tracelog.h"
 #include "colla/file.h"
+#include "colla/ini.h"
+#include "colla/strstream.h"
 
 #include "stb_image.h"
 
@@ -18,7 +20,7 @@
 #if COLLA_WIN
 #define ASSET_DIR "assets/"
 #else
-#define ASSET_DIR "/assets/"
+#define ASSET_DIR "/assets/projects/clouds/data/"
 #endif
 
 static struct {
@@ -44,26 +46,6 @@ static void slog(const char* tag, uint32 log_level, uint32 log_item_id, const ch
 
 static void checkReload(void);
 
-#if 0
-static sg_image loadTexture(const char *fname, const char *name) {
-    stbi_set_flip_vertically_on_load(true);
-
-    int width, height;
-    uchar *pixels = stbi_load(fname, &width, &height, NULL, 4);
-
-    sg_image image = sg_make_image(&(sg_image_desc){
-        .width = width,
-        .height = height,
-        .data.subimage[0][0] = (sg_range){ pixels, width * height * 4 },
-        .label = name,
-    });
-
-    stbi_image_free(pixels);
-
-    return image;
-}
-#endif
-
 static void image_load_callback(const sfetch_response_t *res) {
     if (res->finished) {
         if (res->failed) {
@@ -78,9 +60,6 @@ static void image_load_callback(const sfetch_response_t *res) {
             };
             fatal("could not load %s: %s", res->path, errors[res->error_code]);
         }
-
-        //int width, height;
-        //uchar *pixels = stbi_load_from_memory(res->data.ptr, res->data.size, &width, &height, NULL, 4);
 
         const uint8 *data = res->data.ptr;
         
@@ -112,7 +91,6 @@ static void load_image_async(const char *path, usize max_size, sg_image *image) 
             .ptr = texture_buf,
             .size = max_size,
         },
-        // .user_data = { image, sizeof(sg_image) },
         .user_data = SFETCH_RANGE(image),
     });
     state.still_loading++;
@@ -120,7 +98,6 @@ static void load_image_async(const char *path, usize max_size, sg_image *image) 
 
 void init(void) {
     stm_setup();
-    // state.arena = arenaMake(ARENA_VIRTUAL, 4096);
     state.arena = arenaMake(ARENA_VIRTUAL, MB(5));
 
     sg_setup(&(sg_desc){
@@ -143,8 +120,8 @@ void init(void) {
     state.host.destroy_pipeline = sg_destroy_pipeline;
     state.host.apply_uniform = sg_apply_uniforms;
 
-    load_image_async(ASSET_DIR "webgl/noise.raw", KB(264), &state.host.noise_texture);
-    load_image_async(ASSET_DIR "webgl/blue-noise.raw", MB(4) + KB(256), &state.host.blue_noise_texture);
+    load_image_async(ASSET_DIR "noise.raw", KB(264), &state.host.noise_texture);
+    load_image_async(ASSET_DIR "blue-noise.raw", MB(4) + KB(256), &state.host.blue_noise_texture);
 
     state.host.noise_sampler = sg_make_sampler(&(sg_sampler_desc){
         .min_filter = SG_FILTER_LINEAR,
@@ -153,16 +130,14 @@ void init(void) {
     });
 
     // create render target
-    sg_image_desc rt_desc = {
+    sg_image offscreen_rt = sg_make_image(&(sg_image_desc) {
         .render_target = true,
-        .width = RESX,
-        .height = RESY,
+        .width = state.host.config.resx,
+        .height = state.host.config.resy,
         .pixel_format = SG_PIXELFORMAT_RGBA8,
         .sample_count = 1,
         .label = "offscreen-rendertarget",
-    };
-
-    sg_image offscreen_rt = sg_make_image(&rt_desc); 
+    }); 
 
     // create vbufs for full screen triangles
 
@@ -218,7 +193,10 @@ void init(void) {
     // setup both pass actions
 
     state.display.pass_action = (sg_pass_action) {
-        .colors[0] = { .load_action=SG_LOADACTION_CLEAR, .clear_value={0.0f, 0.0f, 0.0f, 1.0f } }
+        .colors[0] = { 
+            .load_action = SG_LOADACTION_CLEAR, 
+            .clear_value = { 0.2627f, 0.2627f, 0.2823f, 1.0f } 
+        }
     };
 
     state.offscreen_pass = (sg_pass){
@@ -247,59 +225,131 @@ void frame(void) {
 
     sfetch_dowork();
 
-    if (state.still_loading > 0) {
-        return;
-    }
+    if (state.still_loading <= 0) {
+        if (state.just_loaded) {
+            state.just_loaded = false;
+            state.host.on_load(&state.host);
+        }
 
-    if (state.just_loaded) {
-        state.just_loaded = false;
-        state.host.on_load(&state.host);
-    }
+        // offscreen
+        {
+            sg_begin_pass(&state.offscreen_pass);
 
-    // offscreen
-    {
-        sg_begin_pass(&state.offscreen_pass);
-
-        sg_apply_pipeline(state.host.pip);
-        sg_apply_bindings(&state.host.bind);
-
-        crStep(&state.cr);
-
-        sg_draw(0, 3, 1);
-
-        sg_end_pass();
-    }
-
-    // display
-    {
-        sg_begin_pass(&(sg_pass){ .action = state.display.pass_action, .swapchain = sglue_swapchain() });
-
-        sg_apply_pipeline(state.display.pip);
-        sg_apply_bindings(&state.display.bind);
+            sg_apply_pipeline(state.host.pip);
+            sg_apply_bindings(&state.host.bind);
         
-        sg_draw(0, 3, 1);
+            crStep(&state.cr);
 
+            sg_draw(0, 3, 1);
+
+            sg_end_pass();
+        }
+
+        // display
+        {
+            sg_begin_pass(&(sg_pass){ .action = state.display.pass_action, .swapchain = sglue_swapchain() });
+
+            sg_apply_pipeline(state.display.pip);
+            sg_apply_bindings(&state.display.bind);
+
+            float winw = sapp_widthf();
+            float winh = sapp_heightf();
+
+            float scalex = winw / state.host.config.resx;
+            float scaley = winh / state.host.config.resy;
+
+            float scale = scalex > scaley ? scalex : scaley;
+
+            float width = state.host.config.resx * scale;
+            float height = state.host.config.resy * scale;
+
+            sg_apply_viewportf((winw - width) / 2.f, (winh - height) / 2.f, width, height, false);
+
+            sg_draw(0, 3, 1);
+
+            sg_end_pass();
+        }
+    }
+    else {
+        sg_begin_pass(&(sg_pass){ .action = state.display.pass_action, .swapchain = sglue_swapchain() });
         sg_end_pass();
     }
 
     sg_commit();
 }
 
+void save_config() {
+#if !COLLA_EMC
+    file_t fp = fileOpen(state.arena, strv("config.ini"), FILE_WRITE);
+    if (!fileIsValid(fp)) {
+        err("couldn't save config");
+        return;
+    }
+
+    filePrintf(state.arena, fp, "resolution x  = %d\n", state.host.config.resx);
+    filePrintf(state.arena, fp, "resolution y  = %d\n", state.host.config.resy);
+    filePrintf(state.arena, fp, "window width  = %d\n", sapp_width());
+    filePrintf(state.arena, fp, "window height = %d\n", sapp_height());
+
+    fileClose(fp);
+#endif
+}
+
 void cleanup(void) {
     crClose(&state.cr, true);
     sg_shutdown();
     sfetch_shutdown();
+
+    save_config();
+
+    arenaCleanup(&state.arena);
+}
+
+void load_config() {
+    state.host.config = (config_t) {
+        .resx = DEFAULT_RESX,
+        .resy = DEFAULT_RESY,
+        .winx = DEFAULT_WINX,
+        .winy = DEFAULT_WINY,
+    };
+#if !COLLA_EMC
+    if (!fileExists("config.ini")) {
+        return;
+    }
+
+    uint8 tmpbuf[4096] = {0};
+    arena_t tmparena = arenaMake(ARENA_STATIC, sizeof(tmpbuf), tmpbuf);
+
+    ini_t ini = iniParse(&tmparena, strv("config.ini"), NULL);
+    initable_t *root = iniGetTable(&ini, INI_ROOT);
+
+    int resx = iniAsInt(iniGet(root, strv("resolution x")));
+    int resy = iniAsInt(iniGet(root, strv("resolution y")));
+    int winx = iniAsInt(iniGet(root, strv("window width")));
+    int winy = iniAsInt(iniGet(root, strv("window height")));
+
+    if (resx > 0 && resy > 0) {
+        state.host.config.resx = resx;
+        state.host.config.resy = resy;
+    }
+
+    if (winx > 0 && winy > 0) {
+        state.host.config.winx = winx;
+        state.host.config.winy = winy;
+    }
+#endif
 }
 
 sapp_desc sokol_main(int argc, char* argv[]) {
+    load_config();
+
     return (sapp_desc) {
-        .width = WINX,
-        .height = WINY,
+        .width = state.host.config.winx,
+        .height = state.host.config.winy,
         .init_cb = init,
         .frame_cb = frame,
         .cleanup_cb = cleanup,
         .window_title = "Volumetric Clouds",
-        //.event_cb = my_event_func,
     };
 }
 

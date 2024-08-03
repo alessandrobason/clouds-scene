@@ -96,7 +96,6 @@ float fbm(vec3 p, int lod) {
 }
 
 float scene(vec3 p, int lod) {
-    float scale = (cos(Time * .5 + .5) * 3. + 1.);
     float dist = sdf_box(p, vec3(10, 0.5, 10)) * mix(1, -1, 0.);
     float f = fbm(p, lod);
 
@@ -110,7 +109,7 @@ vec4 raymarch(vec3 ro, vec3 rd, float offset) {
 
     for (int i = 0; i < MAX_STEPS; ++i) {
         vec3 p = ro + rd * depth;
-        int lod = 6 - int(log2(1.0 + depth * 0.5))*0;
+        int lod = 6 - int(log2(1.0 + depth * 0.5));
 
         float density = scene(p, lod);
         if (density > 0.0) {
@@ -118,7 +117,7 @@ vec4 raymarch(vec3 ro, vec3 rd, float offset) {
 
             vec3 light = SHADOWCOL + LIGHTCOL * diffuse * 1.5;
 
-            vec4 colour = vec4(mix(vec3(1), vec3(0), density), density);
+            vec4 colour = vec4(vec3(mix(1, 0, density)), density);
             colour.rgb *= light * colour.a;
             sum += colour * (1.0 - sum.a);
         }

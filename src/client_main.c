@@ -51,7 +51,7 @@ CR_EXPORT int cr_loop(cr_t *ctx) {
     host_t *host = ctx->userdata;
 
     uniforms_t uniforms = {
-        .Resolution = { RESX, RESY, },
+        .Resolution = { host->config.resx, host->config.resy, },
         .Time = (float)stm_sec(stm_now()),
     };
     host->apply_uniform(SG_SHADERSTAGE_FS, SLOT_uniforms, &SG_RANGE(uniforms));
